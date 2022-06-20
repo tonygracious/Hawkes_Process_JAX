@@ -4,6 +4,7 @@ config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 from  jax import grad, jit, vmap
 from jax import random
+import numpy as np
 import jax
 #import jax.scipy.optimize as jsp_opt
 from jax_minimize_wrapper import minimize
@@ -11,7 +12,7 @@ from DataGenerator import data_generator, batch_events_merge, Event_batching
 
 
 '''
- \lambda_i = \mu_i +  \sum_j \sum_{t_{jl} < t} \alpha_{ij} \exp{ -\alpha_{ij} * \omega_{ij} (t - t_{jl} ) }
+ \lambda_i = \mu_i +  \sum_j \sum_{t_{jl} < t} \alpha_{ij} \omega \exp{ \omega (t - t_{jl} ) }
 '''
 
 
@@ -35,7 +36,7 @@ def intensity(params, event_times, event_types, t):
     for i in range(m):
         lbda_i = mu[i]
         alpha_i = alpha[i, event_types]
-        lbda_i += jnp.sum( alpha_i  *  jnp.exp( -1 * ( alpha_i * omega * (t - event_times) ) ) )
+        lbda_i += jnp.sum( alpha_i  * omega *  jnp.exp( -1 * ( omega * (t - event_times) ) ) )
         lbda.append(lbda_i)
     lbda = jnp.stack(lbda)
     return lbda.sum()
@@ -51,7 +52,7 @@ def intensity_int(params, event_times, event_types, event_mask, end_time):
     for i in range(m):
         lbda_int += mu[i] * T
         alpha_i = alpha[i, event_types]
-        lbda_int -= (1/omega) * jnp.sum( (jnp.exp(-1 * (alpha_i * omega * (T - event_times))) - 1) * event_mask )
+        lbda_int -=  jnp.sum( alpha_i * (jnp.exp(-1 * ( omega * (T - event_times))) - 1) * event_mask )
     return lbda_int
 
 
@@ -65,13 +66,13 @@ def neg_loglikelihood(params, event_times, event_types, event_mask, end_time):
         i = event_types[n]
         lbda_n = mu[i]
         alpha_i = alpha[i, event_types[:n]]
-        lbda_n += jnp.sum( alpha_i * jnp.exp(-1 * (alpha_i * omega * (event_times[n] - event_times[:n])))  )
-        log_lbda += jnp.log(lbda_n) * event_mask[n]
+        lbda_n += jnp.sum( alpha_i * omega * jnp.exp(-1 * (omega * (event_times[n] - event_times[:n])))  )
+        log_lbda += jnp.log(lbda_n + 1e-7) * event_mask[n]
     lbda_int =  intensity_int(params, event_times, event_types, event_mask, end_time)
     return (log_lbda - lbda_int) * (-1)
-
-batch_negloglikelihood =  vmap(neg_loglikelihood, in_axes=(None, 0, 0, 0, None))
+@jit
 def loss_function(params, event_times, event_types, event_mask, end_time):
+    batch_negloglikelihood =vmap(neg_loglikelihood, in_axes=(None, 0, 0, 0, None))
     loss = batch_negloglikelihood(params, event_times, event_types, event_mask, end_time)
     return loss.mean()
 
@@ -96,8 +97,15 @@ if __name__ == '__main__':
     event_types = jnp.array( batch_event_type, dtype=jnp.int32)
     event_mask  = jnp.array(batch_pad, dtype=jnp.int32)
 
-    bounds = [(0, 0.6) for i in range(m+m**2+1)]
-    opt = {"maxiter": 2}
+    print("Before Optimization Negative Loglikelihood", loss_function(params, event_times, event_types, event_mask, end_time ))
+    bounds = [(0, 1) for i in range(m+m**2+1)]
+    opt = {"maxiter": 50}
     result = minimize(loss_function, params, args = (event_times, event_types, event_mask, end_time), method = "L-BFGS-B", bounds=bounds, options=opt)
-    print(result.x)
+    print("After Optimization Negative Loglikelihood", loss_function(result.x, event_times, event_types, event_mask, end_time))
+    print("mu True values", np.array(baseline))
+    print("mu Estimated Values", result.x[0])
+    print("alpha True values", np.array(adjacency).reshape(m, m))
+    print("alpha Estimated Values", result.x[1])
+    print("omega true value", decays[0])
+    print("omega estimate value", result.x[2])
 
