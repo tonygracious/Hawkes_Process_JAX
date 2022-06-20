@@ -56,7 +56,6 @@ def intensity_int(params, event_times, event_types, event_mask, end_time):
 
 
 def neg_loglikelihood(params, event_times, event_types, event_mask, end_time):
-
     mu =  params[0]
     alpha =  params[1]
     omega =  params[2]
@@ -100,5 +99,5 @@ if __name__ == '__main__':
     bounds = [(0, 0.6) for i in range(m+m**2+1)]
     opt = {"maxiter": 2}
     result = minimize(loss_function, params, args = (event_times, event_types, event_mask, end_time), method = "L-BFGS-B", bounds=bounds, options=opt)
-    print(result)
+    print(result.x)
 

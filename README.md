@@ -1,5 +1,6 @@
 # Hawkes_Process_JAX
 Hawkes Process MLE Inference Using JAX
-* In Progress
+* Work in Progress
 * Gradient Calculation completed 
-* Left to do optimization
+* Optimization
+* Left Debugging why optimization 
