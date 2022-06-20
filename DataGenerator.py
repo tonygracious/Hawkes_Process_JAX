@@ -63,10 +63,10 @@ def Event_batching(N_events_type: List) -> Tuple[np.ndarray, np.ndarray, np.ndar
     """
     assert  len(N_events_type[0].shape) == 2
 
-
+    max_time   = max( [max(events[:,0]) for events in N_events_type])
     max_length = max( [events.shape[0] for events in N_events_type])
     N = len(N_events_type)
-    N_events_pad = np.zeros((N, max_length))
+    N_events_pad = np.ones((N, max_length)) * max_time
     N_events_type_pad = np.zeros((N, max_length))
     N_events_mask = np.zeros((N, max_length))
 
