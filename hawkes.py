@@ -1,20 +1,22 @@
+# again, this only works on startup!
+from jax.config import config
+config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 from  jax import grad, jit, vmap
 from jax import random
 import jax
-
+#import jax.scipy.optimize as jsp_opt
+from jax_minimize_wrapper import minimize
 from DataGenerator import data_generator, batch_events_merge, Event_batching
 
 
 '''
  \lambda_i = \mu_i +  \sum_j \sum_{t_{jl} < t} \alpha_{ij} \exp{ -\alpha_{ij} * \omega_{ij} (t - t_{jl} ) }
 '''
+
+
 # A helper function to randomly initialize to initialize parameters
 def random_layer_params(m, key):
-    """
-    m: num of event types
-    key: random generator key for jax
-    """
     mu_key, alpha_key, omega_key = random.split(key, 3)
     mu = random.uniform(mu_key, (m,))
     alpha = random.uniform(alpha_key, (m, m))
@@ -29,8 +31,6 @@ def intensity(params, event_times, event_types, t):
     mu = params[0]
     alpha = params[1]
     omega = params[2]
-    m = mu.shape[0]
-
     lbda = []
     for i in range(m):
         lbda_i = mu[i]
@@ -55,10 +55,11 @@ def intensity_int(params, event_times, event_types, event_mask, end_time):
     return lbda_int
 
 
-def loglikelihood(params, event_times, event_types, event_mask, end_time):
-    mu = params[0]
-    alpha = params[1]
-    omega = params[2]
+def neg_loglikelihood(params, event_times, event_types, event_mask, end_time):
+
+    mu =  params[0]
+    alpha =  params[1]
+    omega =  params[2]
     N = event_times.shape[0]
     log_lbda = 0
     for n in range(N):
@@ -68,12 +69,12 @@ def loglikelihood(params, event_times, event_types, event_mask, end_time):
         lbda_n += jnp.sum( alpha_i * jnp.exp(-1 * (alpha_i * omega * (event_times[n] - event_times[:n])))  )
         log_lbda += jnp.log(lbda_n) * event_mask[n]
     lbda_int =  intensity_int(params, event_times, event_types, event_mask, end_time)
-    return log_lbda - lbda_int
+    return (log_lbda - lbda_int) * (-1)
 
-'''
-def block_until_ready(pytree):
-  return tree_util.tree_map(lambda x: x.block_until_ready(), pytree)
-'''
+batch_negloglikelihood =  vmap(neg_loglikelihood, in_axes=(None, 0, 0, 0, None))
+def loss_function(params, event_times, event_types, event_mask, end_time):
+    loss = batch_negloglikelihood(params, event_times, event_types, event_mask, end_time)
+    return loss.mean()
 
 if __name__ == '__main__':
     m = 3
@@ -83,39 +84,9 @@ if __name__ == '__main__':
                  [[0], [.3], [0]],
                  [[0], [0], [0.5]]]
     end_time = 100
-    '''
-    n_realizations = 1
-    N_events = data_generator(baseline, decays, \
-                              adjacency, end_time, n_realizations)
-    # Batching Events with appropriate masks
-    event_merge = batch_events_merge(N_events)
-    event_times = jnp.array(event_merge[0][:,0])
-    event_types = jnp.array(event_merge[0][:,1], dtype = jnp.int32)
-    '''
-    params = random_layer_params(m, random.PRNGKey(0))
-    '''
-    print('dfadskjf;kaj')
-    import timeit
-
-    start_time = timeit.default_timer()
-    t1 = timeit.Timer('jax.block_until_ready(grad(loglikelihood, 0)(params, event_times, event_types, end_time))',
-                      globals=globals())
-    print("Before Jit",  t1.timeit(number=7), "seconds" )
-    grad_param  = grad(loglikelihood, 0)(params, event_times, event_types, end_time)
-    print(grad_param)
-
-    grad_intensity = jit( grad(loglikelihood, 0))
-    start_time = timeit.default_timer()
-    grad_param = jax.block_until_ready(grad_intensity(params, event_times, event_types, end_time))
-    print("Compilation Jit",timeit.default_timer() - start_time)
-    print(grad_param)
-
-    start_time = timeit.default_timer()
-    grad_param = grad_intensity(params, event_times, event_types, end_time)
-    t1 = timeit.Timer('jax.block_until_ready(grad_intensity(params, event_times, event_types, end_time))', globals=globals())
-    print("After Jit", t1.timeit(number=7), "seconds")
-    print(grad_param)
-    '''
+    key = random.PRNGKey(0)
+    #params = random.uniform(key, (m + m**2 + 1,) )
+    params = random_layer_params(m, key)
     n_realizations = 5
     N_events = data_generator(baseline, decays, \
                               adjacency, end_time, n_realizations)
@@ -126,13 +97,8 @@ if __name__ == '__main__':
     event_types = jnp.array( batch_event_type, dtype=jnp.int32)
     event_mask  = jnp.array(batch_pad, dtype=jnp.int32)
 
-    #grad_param = grad(loglikelihood, 0)(params, event_times[0], event_types[0], event_mask[0], end_time)
-
-    loglikelihood_compiled  =  jit(vmap(loglikelihood, in_axes =( None, 0, 0, 0, None)))
-    loglikelihood_compiled(params, event_times, event_types, event_mask, end_time)
-    grad_compiled  = jit(vmap(grad(loglikelihood, 0) , in_axes =( None, 0, 0, 0, None)))
-    grad_compiled(params, event_times, event_types, event_mask, end_time)
-
-
-
+    bounds = [(0, 0.6) for i in range(m+m**2+1)]
+    opt = {"maxiter": 2}
+    result = minimize(loss_function, params, args = (event_times, event_types, event_mask, end_time), method = "L-BFGS-B", bounds=bounds, options=opt)
+    print(result)
 
